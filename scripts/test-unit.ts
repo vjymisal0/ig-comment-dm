@@ -381,6 +381,11 @@ describe('web app manifest and mobile installability', () => {
     assert.ok(adminHtml.includes('<link rel="manifest" href="/a/secret123/manifest.webmanifest" />'));
     assert.ok(adminHtml.includes('<link rel="icon" type="image/svg+xml" href="/a/secret123/icon.svg" />'));
     assert.ok(adminHtml.includes(`<link rel="apple-touch-icon" href="${APPLE_TOUCH_ICON_DATA_URI}" />`));
+    const png = Buffer.from(APPLE_TOUCH_ICON_DATA_URI.split(',')[1], 'base64');
+    assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(png.readUInt32BE(16), 180);
+    assert.equal(png.readUInt32BE(20), 180);
+    assert.ok(png.length > 600);
     assert.ok(adminHtml.includes('<meta name="mobile-web-app-capable" content="yes" />'));
     assert.ok(APP_ICON_SVG.startsWith('<svg') && APP_ICON_SVG.includes('</svg>'));
   });
