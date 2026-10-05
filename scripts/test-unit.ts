@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { inflateSync } from 'node:zlib';
 import {
   hmacSha256Hex,
   timingSafeEqualString,
@@ -385,7 +386,43 @@ describe('web app manifest and mobile installability', () => {
     assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.equal(png.readUInt32BE(16), 180);
     assert.equal(png.readUInt32BE(20), 180);
-    assert.ok(png.length > 600);
+    // Header checks alone accept corrupt PNGs that iOS cannot decode.
+    assert.deepEqual([...png.subarray(24, 29)], [8, 2, 0, 0, 0]); // RGB, non-interlaced
+    const chunks: string[] = [];
+    const idat: Buffer[] = [];
+    let offset = 8;
+    while (offset < png.length) {
+      assert.ok(offset + 12 <= png.length, 'complete chunk header and CRC');
+      const length = png.readUInt32BE(offset);
+      const end = offset + 12 + length;
+      assert.ok(end <= png.length, 'chunk data stays within PNG');
+      const type = png.toString('ascii', offset + 4, offset + 8);
+      let crc = 0xffffffff;
+      for (const byte of png.subarray(offset + 4, end - 4)) {
+        crc ^= byte;
+        for (let bit = 0; bit < 8; bit++) {
+          crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+        }
+      }
+      assert.equal((crc ^ 0xffffffff) >>> 0, png.readUInt32BE(end - 4), `${type} CRC`);
+      chunks.push(type);
+      if (type === 'IDAT') idat.push(png.subarray(offset + 8, end - 4));
+      if (type === 'IHDR') assert.equal(length, 13);
+      if (type === 'IEND') {
+        assert.equal(length, 0);
+        assert.equal(end, png.length, 'no trailing data after IEND');
+      }
+      offset = end;
+    }
+    assert.equal(chunks[0], 'IHDR');
+    assert.equal(chunks.at(-1), 'IEND');
+    assert.ok(idat.length > 0);
+    const scanlines = inflateSync(Buffer.concat(idat));
+    const stride = 1 + 180 * 3;
+    assert.equal(scanlines.length, 180 * stride);
+    for (let row = 0; row < 180; row++) {
+      assert.ok(scanlines[row * stride] <= 4, 'valid PNG scanline filter');
+    }
     assert.ok(adminHtml.includes('<meta name="mobile-web-app-capable" content="yes" />'));
     assert.ok(APP_ICON_SVG.startsWith('<svg') && APP_ICON_SVG.includes('</svg>'));
   });
